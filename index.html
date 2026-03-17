@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NODALCLOUD</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      overflow: hidden;
+      touch-action: none; /* Empêche les comportements tactiles natifs du navigateur */
+      user-select: none;
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    
+    /* Styles pour la grille dynamique */
+    #grid-bg {
+      background-image: 
+        linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px),
+        linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+    }
+    
+    /* Animations de base */
+    .token-hover-menu { display: none; }
+    .token:hover .token-hover-menu { display: flex; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans w-screen h-screen flex relative">
+
+  <!-- LOGO -->
+  <div class="absolute top-6 left-6 z-30 select-none pointer-events-none flex items-center gap-3">
+    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 flex items-center justify-center shadow-lg">
+      <span class="text-blue-500 font-black text-lg">N</span>
+    </div>
+    <h1 class="text-2xl font-black tracking-tight drop-shadow-md">
+      <span class="text-slate-400">NODAL</span><span class="text-blue-500">CLOUD</span>
+    </h1>
+  </div>
+
+  <!-- TOOLBAR -->
+  <div id="toolbar" class="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-slate-800 p-3 rounded-full shadow-xl shadow-black/50 border border-slate-700 flex gap-3 items-center">
+    <button id="btn-save" class="w-12 h-12 rounded-full flex items-center justify-center hover:bg-slate-700 transition-all hover:scale-105 text-white text-2xl" title="Sauvegarder">💾</button>
+    <button id="btn-load" class="w-12 h-12 rounded-full flex items-center justify-center hover:bg-slate-700 transition-all hover:scale-105 text-white text-2xl" title="Charger">📤</button>
+    <div class="w-px bg-slate-600 h-8 mx-1"></div>
+    <button id="btn-fullscreen" class="w-12 h-12 rounded-full flex items-center justify-center hover:bg-slate-700 transition-all hover:scale-105 text-white text-2xl" title="Plein écran">⛶</button>
+    <div class="w-px bg-slate-600 h-8 mx-1"></div>
+    <button id="mode-select" class="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl bg-blue-600 text-white shadow-lg shadow-blue-500/30" title="Sélectionner / Déplacer">🖐🏻</button>
+    <button id="mode-create" class="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl hover:bg-slate-700 text-white" title="Créer un Token">📌</button>
+    <button id="mode-link" class="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl hover:bg-slate-700 text-white" title="Lier (Glisser-déposer)">🧵</button>
+    <button id="mode-cut" class="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl hover:bg-slate-700 text-white" title="Couper un lien">✂️</button>
+    <button id="mode-style" class="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl hover:bg-slate-700 text-white" title="Style visuel">🎨</button>
+  </div>
+
+  <!-- ZONE DE TRAVAIL (BOARD) -->
+  <div id="board" class="flex-1 relative overflow-hidden cursor-default">
+    <!-- GRILLE -->
+    <div id="grid-bg" class="absolute inset-0 pointer-events-none"></div>
+
+    <!-- CAMERA -->
+    <div id="camera" style="transform: translate(0px, 0px) scale(1); transform-origin: 0 0; width: 100%; height: 100%; position: absolute; pointer-events: none;">
+      <!-- LIGNES SVG -->
+      <svg id="svg-layer" class="absolute top-0 left-0 overflow-visible z-0" style="width: 1px; height: 1px;"></svg>
+      <!-- TOKENS -->
+      <div id="tokens-layer" class="absolute top-0 left-0 w-full h-full z-10"></div>
+    </div>
+  </div>
+
+  <!-- PANNEAU LATÉRAL -->
+  <div id="side-panel" class="w-80 bg-slate-800 border-l border-slate-700 p-6 flex flex-col gap-6 z-20 shadow-2xl relative shrink-0 hidden">
+    <!-- Contenu injecté via JS -->
+  </div>
+
+  <!-- MODALS -->
+  <div id="modal-container" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
+    <!-- Contenu injecté via JS -->
+  </div>
+
+  <script>
+    // --- ÉTAT GLOBAL ---
+    const state = {
+      tokens: [],
+      links: [],
+      mode: 'select', // select, create, link, cut, style
+      selectedTokenId: null,
+      editingTokenId: null,
+      stylingTokenId: null,
+      
+      draggedToken: null,
+      linkingStart: null,
+      mousePos: { x: 0, y: 0 },
+      dragOffset: { x: 0, y: 0 },
+      hasMoved: false,
+      
+      transform: { x: 0, y: 0, scale: 1 },
+      isPanning: false,
+      
+      projectName: "Nouveau Projet",
+      activeModal: null // 'save', 'load', 'style', null
+    };
+
+    // --- ELEMENTS DOM ---
+    const board = document.getElementById('board');
+    const camera = document.getElementById('camera');
+    const gridBg = document.getElementById('grid-bg');
+    const svgLayer = document.getElementById('svg-layer');
+    const tokensLayer = document.getElementById('tokens-layer');
+    const sidePanel = document.getElementById('side-panel');
+    const modalContainer = document.getElementById('modal-container');
+    
+    // --- UTILITAIRES ---
+    const generateId = () => Date.now().toString() + Math.random().toString(36).substr(2, 5);
+    
+    const getWorldPos = (clientX, clientY) => {
+      const rect = board.getBoundingClientRect();
+      const localX = clientX - rect.left;
+      const localY = clientY - rect.top;
+      return {
+        x: (localX - state.transform.x) / state.transform.scale,
+        y: (localY - state.transform.y) / state.transform.scale
+      };
+    };
+
+    // --- MOTEUR DE RENDU ---
+
+    // Mise à jour de la caméra (Pan, Zoom et Grille)
+    const updateCamera = () => {
+      camera.style.transform = `translate(${state.transform.x}px, ${state.transform.y}px) scale(${state.transform.scale})`;
+      
+      const s = state.transform.scale;
+      gridBg.style.backgroundSize = `${100 * s}px ${100 * s}px, ${100 * s}px ${100 * s}px, ${20 * s}px ${20 * s}px, ${20 * s}px ${20 * s}px`;
+      gridBg.style.backgroundPosition = `${state.transform.x}px ${state.transform.y}px, ${state.transform.x}px ${state.transform.y}px, ${state.transform.x}px ${state.transform.y}px, ${state.transform.x}px ${state.transform.y}px`;
+    };
+
+    // Rendu des lignes SVG
+    const syncLinks = () => {
+      let svgContent = '';
+
+      // Ligne en cours de création
+      if (state.linkingStart && state.mode === 'link') {
+        const source = state.tokens.find(t => t.id === state.linkingStart);
+        if (source) {
+          svgContent += `<line x1="${source.x}" y1="${source.y}" x2="${state.mousePos.x}" y2="${state.mousePos.y}" stroke="#a855f7" stroke-width="3" stroke-dasharray="5,5" />`;
+        }
+      }
+
+      // Liens existants
+      state.links.forEach(link => {
+        const source = state.tokens.find(t => t.id === link.source);
+        const target = state.tokens.find(t => t.id === link.target);
+        if (source && target) {
+          const isCutMode = state.mode === 'cut';
+          const strokeColor = isCutMode ? '#ef4444' : '#475569';
+          const pointerClass = isCutMode ? 'pointer-events-auto cursor-pointer hover:stroke-red-500/50' : 'pointer-events-none';
+          
+          svgContent += `
+            <g class="${isCutMode ? 'cursor-pointer' : ''}" data-linkid="${link.id}">
+              <line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="transparent" stroke-width="20" class="${pointerClass}" />
+              <line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="${strokeColor}" stroke-width="3" class="pointer-events-none transition-colors" />
+            </g>
+          `;
+        }
+      });
+      svgLayer.innerHTML = svgContent;
+    };
+
+    // Rendu des Tokens (Optimisé pour ne mettre à jour que ce qui est nécessaire)
+    const syncTokens = () => {
+      // Supprimer les tokens du DOM qui n'existent plus dans state
+      Array.from(tokensLayer.children).forEach(child => {
+        if (!state.tokens.find(t => t.id === child.dataset.id)) {
+          child.remove();
+        }
+      });
+
+      // Mettre à jour ou créer les tokens
+      state.tokens.forEach(token => {
+        let el = document.getElementById(`token-${token.id}`);
+        const isSelected = state.selectedTokenId === token.id;
+        const bColor = token.borderColor || '#475569';
+        const bWidth = token.borderWidth !== undefined ? token.borderWidth : 2;
+        const gIntens = token.glowIntensity || 0;
+        const tSize = token.size || 80;
+        
+        let customShadow = `0 0 0 ${bWidth}px ${bColor}`;
+        if (gIntens > 0) {
+          customShadow += `, 0 0 ${gIntens}px ${bColor}, 0 0 ${gIntens * 1.5}px ${bColor}`;
+        }
+        if (isSelected) {
+          customShadow += `, 0 0 0 ${bWidth + 4}px #3b82f6`;
+        }
+
+        if (!el) {
+          el = document.createElement('div');
+          el.id = `token-${token.id}`;
+          el.dataset.id = token.id;
+          el.className = 'token absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full group select-none touch-none flex items-center justify-center transition-shadow pointer-events-auto bg-[#1e293b] bg-cover bg-center';
+          
+          // Contenu interne du token (Nom + Menu contextuel)
+          el.innerHTML = `
+            <span class="token-name text-xs font-semibold px-2 text-center break-words w-full overflow-hidden text-ellipsis line-clamp-2" style="display: block;"></span>
+            <div class="token-hover-menu absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity gap-2 bg-slate-800 p-1.5 rounded-lg border border-slate-600 shadow-lg items-center pointer-events-auto flex" style="transform-origin: bottom center;">
+              <span class="hover-name px-2 text-xs font-bold text-slate-200 max-w-[150px] truncate select-text"></span>
+              <div class="w-px bg-slate-600 h-4"></div>
+              <button class="btn-edit w-8 h-8 flex items-center justify-center hover:bg-slate-600 rounded" title="Éditer">✍️</button>
+              <button class="btn-delete w-8 h-8 flex items-center justify-center hover:bg-red-600 rounded text-red-100" title="Supprimer">❌</button>
+            </div>
+          `;
+          tokensLayer.appendChild(el);
+        }
+
+        // Mise à jour des propriétés dynamiques
+        el.style.left = `${token.x}px`;
+        el.style.top = `${token.y}px`;
+        el.style.width = `${tSize}px`;
+        el.style.height = `${tSize}px`;
+        el.style.boxShadow = customShadow;
+        
+        if (token.image) {
+          el.style.backgroundColor = 'transparent';
+          el.style.backgroundImage = `url(${token.image})`;
+          el.querySelector('.token-name').style.display = 'none';
+        } else {
+          el.style.backgroundColor = '#1e293b';
+          el.style.backgroundImage = 'none';
+          el.querySelector('.token-name').style.display = 'block';
+          el.querySelector('.token-name').innerText = token.name;
+        }
+
+        el.querySelector('.hover-name').innerText = token.name;
+        
+        // Ajustement de l'échelle du menu contextuel par rapport au zoom
+        el.querySelector('.token-hover-menu').style.transform = `translate(-50%, 0) scale(${1 / state.transform.scale})`;
+
+        // Curseurs dynamiques
+        if (state.mode === 'link') el.style.cursor = 'alias';
+        else if (state.mode === 'style') el.style.cursor = 'pointer';
+        else el.style.cursor = state.draggedToken === token.id ? 'grabbing' : 'grab';
+      });
+    };
+
+    // Mise à jour des classes de la Toolbar
+    const updateToolbarUI = () => {
+      const modes = ['select', 'create', 'link', 'cut', 'style'];
+      const colors = { select: 'blue', create: 'green', link: 'purple', cut: 'red', style: 'pink' };
+      
+      modes.forEach(m => {
+        const btn = document.getElementById(`mode-${m}`);
+        if (!btn) return;
+        if (state.mode === m) {
+          btn.className = `w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl bg-${colors[m]}-600 text-white shadow-lg shadow-${colors[m]}-500/30`;
+        } else {
+          btn.className = `w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-105 text-2xl hover:bg-slate-700 text-white`;
+        }
+      });
+
+      // Curseur du board
+      board.className = `flex-1 relative overflow-hidden ${state.isPanning ? 'cursor-grabbing' : state.mode === 'create' ? 'cursor-crosshair' : state.mode === 'cut' ? 'cursor-auto' : 'cursor-default'}`;
+    };
+
+    // Rendu du panneau latéral (Édition / Infos)
+    const renderSidePanel = () => {
+      const token = state.tokens.find(t => t.id === state.selectedTokenId);
+      
+      if (!token) {
+        sidePanel.classList.add('hidden');
+        sidePanel.innerHTML = '';
+        return;
+      }
+      
+      sidePanel.classList.remove('hidden');
+      const isEditing = state.editingTokenId === token.id;
+
+      let html = `
+        <button id="close-panel" class="absolute top-4 right-4 text-slate-400 hover:text-white">❌</button>
+        <h2 class="text-xl font-bold border-b border-slate-600 pb-2 mt-4">
+          ${isEditing ? 'Édition du Token' : 'Détails du Token'}
+        </h2>
+      `;
+
+      if (isEditing) {
+        html += `
+          <div class="flex flex-col gap-4">
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Nom</label>
+              <input type="text" id="edit-name" value="${token.name}" class="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Champ de texte (Idées/Notes)</label>
+              <textarea id="edit-text" class="w-full h-32 bg-slate-900 border border-slate-600 rounded p-2 text-white focus:outline-none focus:border-blue-500 resize-none" placeholder="Écrivez vos idées ici...">${token.text || ""}</textarea>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Image (Source locale)</label>
+              <input type="file" id="edit-image" accept="image/*" class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer" />
+              ${token.image ? `<button id="del-image" class="mt-2 text-sm text-red-400 hover:text-red-300 flex items-center gap-1">Supprimer l'image actuelle</button>` : ''}
+            </div>
+            <button id="end-edit" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-medium transition-colors">Terminer l'édition</button>
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="flex flex-col gap-4 h-full">
+            ${token.image ? `<div class="w-full h-40 rounded-lg overflow-hidden bg-slate-900 border border-slate-700 flex items-center justify-center"><img src="${token.image}" class="max-w-full max-h-full object-contain" /></div>` : ''}
+            <div>
+              <h3 class="text-2xl font-bold text-white mb-2">${token.name}</h3>
+              <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 min-h-[100px] whitespace-pre-wrap text-slate-300">${token.text || '<span class="text-slate-500 italic">Aucune note pour ce token...</span>'}</div>
+            </div>
+            <button id="start-edit" class="mt-auto flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded transition-colors"><span>✍️</span> Modifier ce Token</button>
+          </div>
+        `;
+      }
+      
+      sidePanel.innerHTML = html;
+
+      // Attacher les événements du panneau
+      document.getElementById('close-panel')?.addEventListener('click', () => {
+        state.selectedTokenId = null;
+        state.editingTokenId = null;
+        updateAll();
+      });
+
+      if (isEditing) {
+        document.getElementById('edit-name')?.addEventListener('input', (e) => {
+          token.name = e.target.value; syncTokens();
+        });
+        document.getElementById('edit-text')?.addEventListener('input', (e) => {
+          token.text = e.target.value;
+        });
+        document.getElementById('edit-image')?.addEventListener('change', (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = () => { token.image = reader.result; updateAll(); };
+            reader.readAsDataURL(file);
+          }
+        });
+        document.getElementById('del-image')?.addEventListener('click', () => {
+          token.image = null; updateAll();
+        });
+        document.getElementById('end-edit')?.addEventListener('click', () => {
+          state.editingTokenId = null; updateAll();
+        });
+      } else {
+        document.getElementById('start-edit')?.addEventListener('click', () => {
+          state.editingTokenId = token.id; updateAll();
+        });
+      }
+    };
+
+    // Rendu des Modals (Save/Load/Style)
+    const renderModals = () => {
+      if (!state.activeModal) {
+        modalContainer.classList.add('hidden');
+        modalContainer.innerHTML = '';
+        return;
+      }
+      modalContainer.classList.remove('hidden');
+
+      let html = '';
+
+      if (state.activeModal === 'save') {
+        html = `
+          <div class="bg-slate-800 border border-slate-600 p-6 rounded-xl shadow-2xl w-96 flex flex-col gap-4" onmousedown="event.stopPropagation()">
+            <h3 class="text-xl font-bold text-white flex justify-between items-center">Sauvegarder 💾 <button class="close-modal text-slate-400 hover:text-white text-sm">❌</button></h3>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Nom du projet</label>
+              <input type="text" id="save-name" value="${state.projectName}" class="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button id="save-local" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-medium transition-colors">Local Storage</button>
+              <button id="save-json" class="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded font-medium transition-colors">Fichier JSON</button>
+            </div>
+          </div>
+        `;
+      } 
+      else if (state.activeModal === 'load') {
+        let projectsHtml = state.savedProjects.length === 0 
+          ? '<span class="text-slate-500 text-sm italic">Aucun projet trouvé en local.</span>'
+          : state.savedProjects.map(p => `
+              <button data-key="${p.key}" class="load-proj-btn text-left px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-white flex justify-between items-center transition-colors">
+                <span class="truncate max-w-[200px] font-medium">${p.name}</span><span class="text-xs text-slate-400">📝 Charger</span>
+              </button>
+            `).join('');
+
+        html = `
+          <div class="bg-slate-800 border border-slate-600 p-6 rounded-xl shadow-2xl w-96 flex flex-col gap-4 max-h-[80vh]" onmousedown="event.stopPropagation()">
+            <h3 class="text-xl font-bold text-white flex justify-between items-center">Charger 📤 <button class="close-modal text-slate-400 hover:text-white text-sm">❌</button></h3>
+            <div class="flex flex-col gap-2 overflow-y-auto pr-2 max-h-60 custom-scrollbar">
+              <label class="text-sm text-slate-400 font-semibold border-b border-slate-700 pb-1">Projets Locaux</label>
+              ${projectsHtml}
+            </div>
+            <div class="mt-2 pt-4 border-t border-slate-700">
+              <label class="text-sm text-slate-400 font-semibold mb-2 block">Importer depuis un fichier JSON</label>
+              <input type="file" id="load-json" accept=".json" class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700 cursor-pointer" />
+            </div>
+          </div>
+        `;
+      }
+      else if (state.activeModal === 'style' && state.stylingTokenId) {
+        const token = state.tokens.find(t => t.id === state.stylingTokenId);
+        if (token) {
+          html = `
+            <div class="bg-slate-800 border border-slate-600 p-6 rounded-xl shadow-2xl w-80 flex flex-col gap-5" onmousedown="event.stopPropagation()">
+              <h3 class="text-xl font-bold text-white flex justify-between items-center border-b border-slate-700 pb-2">Style du Token 🎨 <button class="close-modal text-slate-400 hover:text-white text-sm">❌</button></h3>
+              <div>
+                <label class="block text-sm text-slate-400 mb-2">Couleur du contour</label>
+                <div class="flex items-center gap-3">
+                  <input type="color" id="style-color" value="${token.borderColor || '#475569'}" class="w-12 h-10 bg-slate-900 border border-slate-600 rounded cursor-pointer" />
+                  <span id="style-color-val" class="text-xs font-mono text-slate-500 uppercase">${token.borderColor || '#475569'}</span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-sm text-slate-400 mb-2 flex justify-between"><span>Taille du Token</span><span id="style-size-val" class="text-white font-bold">${token.size || 80}px</span></label>
+                <input type="range" id="style-size" min="40" max="300" value="${token.size || 80}" class="w-full accent-blue-500 cursor-pointer" />
+              </div>
+              <div>
+                <label class="block text-sm text-slate-400 mb-2 flex justify-between"><span>Intensité de la brillance</span><span id="style-glow-val" class="text-white font-bold">${token.glowIntensity || 0}</span></label>
+                <input type="range" id="style-glow" min="0" max="50" value="${token.glowIntensity || 0}" class="w-full accent-pink-500 cursor-pointer" />
+              </div>
+              <button class="close-modal mt-4 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded font-medium transition-colors">Terminer</button>
+            </div>
+          `;
+        } else {
+          state.activeModal = null;
+          updateAll();
+          return;
+        }
+      }
+
+      modalContainer.innerHTML = html;
+
+      // Attachement des événements de la modale
+      modalContainer.querySelectorAll('.close-modal').forEach(btn => btn.addEventListener('click', () => { state.activeModal = null; state.stylingTokenId = null; updateAll(); }));
+      
+      if (state.activeModal === 'save') {
+        document.getElementById('save-name').addEventListener('input', e => state.projectName = e.target.value);
+        document.getElementById('save-local').addEventListener('click', () => {
+          if (!state.projectName.trim()) return alert("Veuillez entrer un nom de projet.");
+          localStorage.setItem(`cloudedit_proj_${state.projectName}`, JSON.stringify(getProjectData()));
+          state.activeModal = null; updateAll();
+        });
+        document.getElementById('save-json').addEventListener('click', () => {
+          const blob = new Blob([JSON.stringify(getProjectData(), null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${state.projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'cloudedit'}.json`;
+          a.click(); URL.revokeObjectURL(url);
+          state.activeModal = null; updateAll();
+        });
+      }
+      
+      if (state.activeModal === 'load') {
+        document.querySelectorAll('.load-proj-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            try { const data = JSON.parse(localStorage.getItem(btn.dataset.key)); if (data) loadDataIntoState(data); } catch(e){}
+          });
+        });
+        document.getElementById('load-json')?.addEventListener('change', e => {
+          const file = e.target.files[0]; if (!file) return;
+          const reader = new FileReader();
+          reader.onload = ev => {
+            try { loadDataIntoState(JSON.parse(ev.target.result)); } 
+            catch(err) { alert("Fichier JSON invalide."); }
+          };
+          reader.readAsText(file);
+        });
+      }
+
+      if (state.activeModal === 'style') {
+        const token = state.tokens.find(t => t.id === state.stylingTokenId);
+        document.getElementById('style-color')?.addEventListener('input', e => {
+          token.borderColor = e.target.value; document.getElementById('style-color-val').innerText = e.target.value; syncTokens();
+        });
+        document.getElementById('style-size')?.addEventListener('input', e => {
+          token.size = parseInt(e.target.value); document.getElementById('style-size-val').innerText = e.target.value + 'px'; syncTokens(); syncLinks();
+        });
+        document.getElementById('style-glow')?.addEventListener('input', e => {
+          token.glowIntensity = parseInt(e.target.value); document.getElementById('style-glow-val').innerText = e.target.value; syncTokens();
+        });
+      }
+    };
+
+    const updateAll = () => {
+      updateCamera();
+      syncTokens();
+      syncLinks();
+      updateToolbarUI();
+      renderSidePanel();
+      renderModals();
+    };
+
+    // --- DATA MANAGEMENT ---
+    const getProjectData = () => ({ version: 1, projectName: state.projectName, tokens: state.tokens, links: state.links, transform: state.transform });
+    
+    const loadDataIntoState = (data) => {
+      state.tokens = data.tokens || [];
+      state.links = data.links || [];
+      if (data.transform) state.transform = data.transform;
+      if (data.projectName) state.projectName = data.projectName;
+      state.mode = 'select';
+      state.selectedTokenId = null;
+      state.editingTokenId = null;
+      state.stylingTokenId = null;
+      state.activeModal = null;
+      updateAll();
+    };
+
+    const loadLocalProjectsList = () => {
+      const projects = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith('cloudedit_proj_')) {
+          try {
+            const data = JSON.parse(localStorage.getItem(key));
+            projects.push({ key, name: data.projectName || key.replace('cloudedit_proj_', '') });
+          } catch(e) {}
+        }
+      }
+      state.savedProjects = projects;
+    };
+
+    // --- GESTIONNAIRES D'ÉVÉNEMENTS ---
+
+    // Événements globaux (Window)
+    window.addEventListener('mouseup', () => {
+      state.isPanning = false;
+      state.draggedToken = null;
+      state.linkingStart = null;
+      updateToolbarUI();
+      syncLinks();
+    });
+
+    modalContainer.addEventListener('mousedown', () => {
+      if(state.activeModal === 'style') { state.activeModal = null; state.stylingTokenId = null; updateAll(); }
+      else { state.activeModal = null; updateAll(); }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      const btn = document.getElementById('btn-fullscreen');
+      btn.innerHTML = document.fullscreenElement ? '🗗' : '⛶';
+      btn.title = document.fullscreenElement ? "Quitter le plein écran" : "Plein écran";
+    });
+
+    // Événements Toolbar
+    document.getElementById('btn-save').addEventListener('click', () => { state.activeModal = 'save'; updateAll(); });
+    document.getElementById('btn-load').addEventListener('click', () => { loadLocalProjectsList(); state.activeModal = 'load'; updateAll(); });
+    document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    });
+    ['select', 'create', 'link', 'cut', 'style'].forEach(m => {
+      document.getElementById(`mode-${m}`).addEventListener('click', () => { state.mode = m; updateAll(); });
+    });
+
+    // Événements Board & Camera (Pan & Zoom)
+    board.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomSensitivity = 0.0015;
+      const delta = -e.deltaY * zoomSensitivity;
+      const newScale = Math.min(Math.max(0.1, state.transform.scale * (1 + delta)), 5);
+
+      const rect = board.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      state.transform.x = mouseX - (mouseX - state.transform.x) * (newScale / state.transform.scale);
+      state.transform.y = mouseY - (mouseY - state.transform.y) * (newScale / state.transform.scale);
+      state.transform.scale = newScale;
+      updateCamera();
+    }, { passive: false });
+
+    board.addEventListener('mousedown', (e) => {
+      if (e.button === 1) { // Molette
+        e.preventDefault();
+        state.isPanning = true;
+        state.hasMoved = false;
+        updateToolbarUI();
+        return;
+      }
+      
+      const isTargetingBoard = e.target.id === 'board' || e.target.tagName === 'svg' || e.target.id === 'tokens-layer' || e.target.id === 'grid-bg';
+      
+      if (isTargetingBoard && e.button === 0) {
+        if (state.mode === 'create' && !state.hasMoved) {
+          const worldPos = getWorldPos(e.clientX, e.clientY);
+          const newToken = {
+            id: generateId(),
+            x: worldPos.x, y: worldPos.y,
+            name: `Idée ${state.tokens.length + 1}`,
+            text: "", image: null,
+            borderColor: '#475569', borderWidth: 2, size: 80, glowIntensity: 0
+          };
+          state.tokens.push(newToken);
+          state.selectedTokenId = newToken.id;
+          state.editingTokenId = newToken.id;
+          state.mode = 'select';
+          updateAll();
+        } else {
+          state.selectedTokenId = null;
+          state.editingTokenId = null;
+          state.stylingTokenId = null;
+          updateAll();
+        }
+      }
+    });
+
+    board.addEventListener('mousemove', (e) => {
+      if (state.isPanning) {
+        state.hasMoved = true;
+        state.transform.x += e.movementX;
+        state.transform.y += e.movementY;
+        updateCamera();
+        return;
+      }
+
+      const worldPos = getWorldPos(e.clientX, e.clientY);
+      state.mousePos = worldPos;
+
+      if (state.draggedToken) {
+        state.hasMoved = true;
+        const token = state.tokens.find(t => t.id === state.draggedToken);
+        if (token) {
+          token.x = worldPos.x + state.dragOffset.x;
+          token.y = worldPos.y + state.dragOffset.y;
+          syncTokens(); // MàJ rapide du token
+          syncLinks();  // MàJ rapide des traits
+        }
+      }
+
+      if (state.mode === 'link' && state.linkingStart) {
+        syncLinks(); // Mettre à jour la ligne de prévisualisation
+      }
+    });
+
+    // Événements Délégués sur les Tokens & Liens
+    camera.addEventListener('mousedown', (e) => {
+      // Gestion des clics sur les boutons rapides du token
+      const btnEdit = e.target.closest('.btn-edit');
+      const btnDelete = e.target.closest('.btn-delete');
+      const tokenEl = e.target.closest('.token');
+      const linkEl = e.target.closest('g[data-linkid]');
+
+      if (e.button === 1) return; // Laisser le board gérer le pan
+
+      if (btnEdit) {
+        e.stopPropagation();
+        const id = btnEdit.closest('.token').dataset.id;
+        state.selectedTokenId = id; state.editingTokenId = id;
+        updateAll();
+        return;
+      }
+
+      if (btnDelete) {
+        e.stopPropagation();
+        const id = btnDelete.closest('.token').dataset.id;
+        state.tokens = state.tokens.filter(t => t.id !== id);
+        state.links = state.links.filter(l => l.source !== id && l.target !== id);
+        if (state.selectedTokenId === id) { state.selectedTokenId = null; state.editingTokenId = null; }
+        updateAll();
+        return;
+      }
+
+      if (linkEl && state.mode === 'cut') {
+        e.stopPropagation();
+        const linkId = linkEl.dataset.linkid;
+        state.links = state.links.filter(l => l.id !== linkId);
+        syncLinks();
+        return;
+      }
+
+      if (tokenEl) {
+        e.stopPropagation();
+        state.hasMoved = false;
+        const id = tokenEl.dataset.id;
+        const worldPos = getWorldPos(e.clientX, e.clientY);
+        const token = state.tokens.find(t => t.id === id);
+        
+        if (token) {
+          state.dragOffset = { x: token.x - worldPos.x, y: token.y - worldPos.y };
+        }
+
+        if (state.mode === 'link') {
+          state.linkingStart = id;
+        } else if (state.mode === 'select' || state.mode === 'create' || state.mode === 'style') {
+          state.draggedToken = id;
+          state.selectedTokenId = id;
+          if (state.mode === 'create') state.mode = 'select';
+          syncTokens();
+          renderSidePanel();
+          updateToolbarUI();
+        }
+      }
+    });
+
+    camera.addEventListener('mouseup', (e) => {
+      const tokenEl = e.target.closest('.token');
+      if (tokenEl && e.button !== 1) {
+        e.stopPropagation();
+        const id = tokenEl.dataset.id;
+        
+        if (state.mode === 'link' && state.linkingStart && state.linkingStart !== id) {
+          const linkExists = state.links.some(l => 
+            (l.source === state.linkingStart && l.target === id) || 
+            (l.source === id && l.target === state.linkingStart)
+          );
+          if (!linkExists) {
+            state.links.push({ id: generateId(), source: state.linkingStart, target: id });
+          }
+        }
+        
+        state.linkingStart = null;
+        state.draggedToken = null;
+        
+        if (!state.hasMoved) {
+          if (state.mode === 'style') {
+            state.stylingTokenId = id;
+            state.activeModal = 'style';
+          } else {
+            state.selectedTokenId = id;
+          }
+          updateAll();
+        }
+      }
+    });
+
+    // --- INITIALISATION ---
+    updateAll();
+
+  </script>
+</body>
+</html>
