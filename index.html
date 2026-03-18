@@ -575,10 +575,12 @@
     }, { passive: false });
 
     board.addEventListener('mousedown', (e) => {
+      // CORRECTION : On réinitialise l'état de mouvement à chaque nouveau clic
+      state.hasMoved = false;
+
       if (e.button === 1) { // Molette
         e.preventDefault();
         state.isPanning = true;
-        state.hasMoved = false;
         updateToolbarUI();
         return;
       }
@@ -586,7 +588,8 @@
       const isTargetingBoard = e.target.id === 'board' || e.target.tagName === 'svg' || e.target.id === 'tokens-layer' || e.target.id === 'grid-bg';
       
       if (isTargetingBoard && e.button === 0) {
-        if (state.mode === 'create' && !state.hasMoved) {
+        // La condition de blocage (!state.hasMoved) a été retirée car elle est gérée au dessus
+        if (state.mode === 'create') {
           const worldPos = getWorldPos(e.clientX, e.clientY);
           const newToken = {
             id: generateId(),
