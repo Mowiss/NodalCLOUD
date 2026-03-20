@@ -27,7 +27,7 @@
     
     /* Animations de base */
     .token-hover-menu { display: none; }
-    .token:hover .token-hover-menu { display: flex; }
+    #board[data-mode="select"] .token:hover .token-hover-menu { display: flex; }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans w-screen h-screen flex relative">
@@ -71,7 +71,7 @@
   </div>
 
   <!-- PANNEAU LATÉRAL -->
-  <div id="side-panel" class="w-80 bg-slate-800 border-l border-slate-700 p-6 flex flex-col gap-6 z-20 shadow-2xl relative shrink-0 hidden">
+  <div id="side-panel" class="w-[420px] bg-slate-800 border-l border-slate-700 p-6 pt-4 flex flex-col z-20 shadow-2xl relative shrink-0 hidden max-h-screen">
     <!-- Contenu injecté via JS -->
   </div>
 
@@ -100,7 +100,8 @@
       isPanning: false,
       
       projectName: "Nouveau Projet",
-      activeModal: null // 'save', 'load', 'style', null
+      activeModal: null, // 'save', 'load', 'style', 'delete', null
+      tokenToDelete: null // Stocke temporairement l'ID du token à supprimer
     };
 
     // --- ELEMENTS DOM ---
@@ -258,8 +259,9 @@
         }
       });
 
-      // Curseur du board
+      // Curseur du board et attribut data-mode pour bloquer les menus flottants indésirables
       board.className = `flex-1 relative overflow-hidden ${state.isPanning ? 'cursor-grabbing' : state.mode === 'create' ? 'cursor-crosshair' : state.mode === 'cut' ? 'cursor-auto' : 'cursor-default'}`;
+      board.dataset.mode = state.mode;
     };
 
     // Rendu du panneau latéral (Édition / Infos)
@@ -276,40 +278,40 @@
       const isEditing = state.editingTokenId === token.id;
 
       let html = `
-        <button id="close-panel" class="absolute top-4 right-4 text-slate-400 hover:text-white">❌</button>
-        <h2 class="text-xl font-bold border-b border-slate-600 pb-2 mt-4">
+        <button id="close-panel" class="absolute top-4 right-4 text-slate-400 hover:text-white z-10 bg-slate-800 rounded-full p-1">❌</button>
+        <h2 class="text-xl font-bold border-b border-slate-600 pb-3 mt-2 mb-4 shrink-0 pr-8">
           ${isEditing ? 'Édition du Token' : 'Détails du Token'}
         </h2>
       `;
 
       if (isEditing) {
         html += `
-          <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-5 overflow-y-auto custom-scrollbar pr-2 flex-1 pb-4">
             <div>
               <label class="block text-sm text-slate-400 mb-1">Nom</label>
               <input type="text" id="edit-name" value="${token.name}" class="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white focus:outline-none focus:border-blue-500" />
             </div>
-            <div>
+            <div class="flex-1 flex flex-col min-h-[200px]">
               <label class="block text-sm text-slate-400 mb-1">Champ de texte (Idées/Notes)</label>
-              <textarea id="edit-text" class="w-full h-32 bg-slate-900 border border-slate-600 rounded p-2 text-white focus:outline-none focus:border-blue-500 resize-none" placeholder="Écrivez vos idées ici...">${token.text || ""}</textarea>
+              <textarea id="edit-text" class="w-full flex-1 bg-slate-900 border border-slate-600 rounded p-2 text-white focus:outline-none focus:border-blue-500 resize-y min-h-[150px]" placeholder="Écrivez vos idées ici...">${token.text || ""}</textarea>
             </div>
             <div>
               <label class="block text-sm text-slate-400 mb-1">Image (Source locale)</label>
               <input type="file" id="edit-image" accept="image/*" class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer" />
               ${token.image ? `<button id="del-image" class="mt-2 text-sm text-red-400 hover:text-red-300 flex items-center gap-1">Supprimer l'image actuelle</button>` : ''}
             </div>
-            <button id="end-edit" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-medium transition-colors">Terminer l'édition</button>
+            <button id="end-edit" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded font-medium transition-colors shrink-0">Terminer l'édition</button>
           </div>
         `;
       } else {
         html += `
-          <div class="flex flex-col gap-4 h-full">
-            ${token.image ? `<div class="w-full h-40 rounded-lg overflow-hidden bg-slate-900 border border-slate-700 flex items-center justify-center"><img src="${token.image}" class="max-w-full max-h-full object-contain" /></div>` : ''}
+          <div class="flex flex-col gap-5 overflow-y-auto custom-scrollbar pr-2 flex-1 pb-4">
+            ${token.image ? `<div class="w-full h-48 rounded-lg overflow-hidden bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0"><img src="${token.image}" class="max-w-full max-h-full object-contain" /></div>` : ''}
             <div>
-              <h3 class="text-2xl font-bold text-white mb-2">${token.name}</h3>
-              <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 min-h-[100px] whitespace-pre-wrap text-slate-300">${token.text || '<span class="text-slate-500 italic">Aucune note pour ce token...</span>'}</div>
+              <h3 class="text-2xl font-bold text-white mb-3">${token.name}</h3>
+              <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 min-h-[150px] whitespace-pre-wrap text-slate-300">${token.text || '<span class="text-slate-500 italic">Aucune note pour ce token...</span>'}</div>
             </div>
-            <button id="start-edit" class="mt-auto flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded transition-colors"><span>✍️</span> Modifier ce Token</button>
+            <button id="start-edit" class="mt-auto flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded transition-colors shrink-0"><span>✍️</span> Modifier ce Token</button>
           </div>
         `;
       }
@@ -430,12 +432,25 @@
           return;
         }
       }
+      else if (state.activeModal === 'delete' && state.tokenToDelete) {
+        html = `
+          <div class="bg-slate-800 border border-slate-600 p-6 rounded-xl shadow-2xl w-80 flex flex-col gap-5 text-center" onmousedown="event.stopPropagation()">
+            <div class="text-4xl mb-2">⚠️</div>
+            <h3 class="text-xl font-bold text-white">Supprimer l'idée ?</h3>
+            <p class="text-slate-400 text-sm">Êtes-vous sûr de vouloir effacer ce token et tous ses liens ? Cette action est irréversible.</p>
+            <div class="flex gap-3 mt-4">
+              <button id="cancel-delete" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded font-medium transition-colors">Annuler</button>
+              <button id="confirm-delete" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded font-medium transition-colors">Supprimer</button>
+            </div>
+          </div>
+        `;
+      }
 
       modalContainer.innerHTML = html;
 
       // Attachement des événements de la modale
-      modalContainer.querySelectorAll('.close-modal').forEach(btn => btn.addEventListener('click', () => { state.activeModal = null; state.stylingTokenId = null; updateAll(); }));
-      
+      modalContainer.querySelectorAll('.close-modal').forEach(btn => btn.addEventListener('click', () => { state.activeModal = null; state.stylingTokenId = null; state.tokenToDelete = null; updateAll(); }));
+
       if (state.activeModal === 'save') {
         document.getElementById('save-name').addEventListener('input', e => state.projectName = e.target.value);
         document.getElementById('save-local').addEventListener('click', () => {
@@ -481,6 +496,23 @@
         });
         document.getElementById('style-glow')?.addEventListener('input', e => {
           token.glowIntensity = parseInt(e.target.value); document.getElementById('style-glow-val').innerText = e.target.value; syncTokens();
+        });
+      }
+
+      if (state.activeModal === 'delete') {
+        document.getElementById('cancel-delete')?.addEventListener('click', () => {
+          state.activeModal = null;
+          state.tokenToDelete = null;
+          updateAll();
+        });
+        document.getElementById('confirm-delete')?.addEventListener('click', () => {
+          const id = state.tokenToDelete;
+          state.tokens = state.tokens.filter(t => t.id !== id);
+          state.links = state.links.filter(l => l.source !== id && l.target !== id);
+          if (state.selectedTokenId === id) { state.selectedTokenId = null; state.editingTokenId = null; }
+          state.activeModal = null;
+          state.tokenToDelete = null;
+          updateAll();
         });
       }
     };
@@ -661,9 +693,9 @@
       if (btnDelete) {
         e.stopPropagation();
         const id = btnDelete.closest('.token').dataset.id;
-        state.tokens = state.tokens.filter(t => t.id !== id);
-        state.links = state.links.filter(l => l.source !== id && l.target !== id);
-        if (state.selectedTokenId === id) { state.selectedTokenId = null; state.editingTokenId = null; }
+        // CORRECTION : Au lieu de supprimer directement, on ouvre la modale
+        state.tokenToDelete = id;
+        state.activeModal = 'delete';
         updateAll();
         return;
       }
@@ -726,8 +758,10 @@
           } else {
             state.selectedTokenId = id;
           }
-          updateAll();
         }
+        
+        // CORRECTION : On force la mise à jour de l'écran quoi qu'il arrive (corrige le bug du lien invisible)
+        updateAll();
       }
     });
 
